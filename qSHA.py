@@ -3,31 +3,25 @@ from sage.all import *
 from itertools import combinations, permutations
 from sbox_gates import *
 import numpy as np
+from ClassicalSimulator import ClassicalSimulator
 
-initial_reg = [
-            cirq.NamedQubit("initial_reg" + str(i)) for i in range(1600)
-        ]
-iota_reg = [
-            cirq.NamedQubit("iota_reg" + str(i)) for i in range(1600)
-        ]
-chi_reg = [
-            cirq.NamedQubit("chi_reg" + str(i)) for i in range(1600)
-        ]
-pi_reg = [
-            cirq.NamedQubit("pi_reg" + str(i)) for i in range(1600)
-        ]
-rho_reg = [
-            cirq.NamedQubit("rho_reg" + str(i)) for i in range(1600)
-       ]
-theta_reg = [ cirq.NamedQubit("theta_reg" + str(i)) for i in range(1600)]
+
 
 circuit = cirq.Circuit()
 
 def main():
+    simulator = ClassicalSimulator()
+    print("simulator is on ...")
     print("created vars...")
     msg = [0]*1600 # CLASSICAL CONSTRUCTION
-    SHA3(msg)
+    print("Rendering Circuit...")
+    output_register = SHA3(msg)
     print(f"First count: {count_gates(circuit)}")
+    print("simulating circuit...")
+    result = simulator.run(circuit)
+    print("simulation complete!")
+    quantum_values = read_meas_results(output_register, result)
+    print(quantum_values)
 
 
 def configure_circuit_input(configuration, orig_circuit=None, input_bit_list = [0]*1600):
@@ -58,6 +52,7 @@ def quantum_parity_addition(summands, target):
 # 1600 bits(1 dimensional array) to 3 dimensional array of 5x5x64
 def _1Dto3D(A):
     A = np.array(A).reshape(5,5,64)
+    initial_reg = [cirq.NamedQubit("initial_reg" + str(i)) for i in range(1600)]
     A_out = np.array(initial_reg).reshape(5,5,64) # Initialize empty 5x5x64 array
     for i in range(5):
         for j in range(5):
@@ -68,6 +63,7 @@ def _1Dto3D(A):
 
 
 def theta(A):
+        theta_reg = [ cirq.NamedQubit("theta_reg" + str(i)) for i in range(1600)]
         A_out = np.array(theta_reg).reshape(5,5,64)  # Initialize empty 5x5x64 array
        #A_out = [[[0 for _ in range(64)] for _ in range(5)] for _ in range(5)] #without numpy
         for i in range(5):
@@ -86,7 +82,7 @@ def theta(A):
 def rho(A):
     rhomatrix=[[0,36,3,41,18],[1,44,10,45,2],[62,6,43,15,61],[28,55,25,21,56],[27,20,39,8,14]]
     rhom = np.array(rhomatrix, dtype=int)  # Initialize empty 5x5x64 array
-    A_out = np.array(rho_reg).reshape(5,5,64)
+    A_out = A.copy()
     for i in range(5):
         for j in range(5):
             for k in range(64):
@@ -95,7 +91,7 @@ def rho(A):
 
 #Pi: Permutate the 64 bit words
 def pi(A):
-    A_out = np.array(pi_reg).reshape(5,5,64) # Initialize empty 5x5x64 array
+    A_out = A.copy() # Initialize empty 5x5x64 array
     for i in range(5):
         for j in range(5):
             for k in range(64):
@@ -104,6 +100,7 @@ def pi(A):
 
 # A_out [i][j][k] = A[i][j][k] XOR ( (A[i + 1][j][k] XOR 1) AND (ain[i + 2][j][k]) )
 def chi(A):
+    chi_reg = [ cirq.NamedQubit("chi_reg" + str(i)) for i in range(1600)]
     A_out = np.array(chi_reg).reshape(5,5,64) # Initialize empty 5x5x64 array
     for i in range(5):
         for j in range(5):
@@ -133,16 +130,25 @@ def iota(A, round):
     # Calculate A_out
     for l in range(7):
         if rc[l + 7*round]:
-            circuit.append(cirq.X(A_out[0][0][2**l - 1] ))
+            circuit.append(cirq.X(A[0][0][2**l - 1] ))
+    return A
 
 # 5x5x64 (three-dimensional array) into 1600 bits(one-dimensional array)
 def _3Dto1D(A):
-    A_out = np.zeros(1600, dtype = int) # Initialize empty array of size 1600
+    A_out = [0]*1600# Initialize empty array of size 1600
     for i in range(5):
         for j in range(5):
             for k in range(64):
-                A_out[64*(5*j+i)+k] = A[i][j][k]
+                circuit.append(cirq.ops.measure(A[i][j][k]))
+                A_out[64*(5*j+i)+k] = A[i][j][k]   
     return A_out
+
+def read_meas_results(register, result):
+    quantum_u_values = []
+    for qubit in register:
+        quantum_u_values += [int(result.measurements[qubit.name])]
+    return quantum_u_values
+
 
 # 24 X (ι ◦ χ ◦ π ◦ ρ ◦ θ)
 def SHA3(SHA_in):
@@ -150,7 +156,8 @@ def SHA3(SHA_in):
     A_3D = _1Dto3D(SHA_in)
     for r in range(24):
         SHA_out_3D = iota(chi(pi(rho(theta(A_3D)))), r)
+    sha_out_1D = _3Dto1D(SHA_out_3D)
     print("complete!")
-    return 0
+    return(sha_out_1D)
 
 main()
