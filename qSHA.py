@@ -5,6 +5,7 @@ from sbox_gates import *
 import numpy as np
 from ClassicalSimulator import ClassicalSimulator
 
+import classical
 
 
 circuit = cirq.Circuit()
@@ -13,7 +14,7 @@ def main():
     simulator = ClassicalSimulator()
     print("simulator is on ...")
     print("created vars...")
-    msg = [0]*1600 # CLASSICAL CONSTRUCTION
+    msg = [1] + [0]*1598 + [1] # CLASSICAL CONSTRUCTION
     print("Rendering Circuit...")
     output_register = SHA3(msg)
     print(f"First count: {count_gates(circuit)}")
@@ -75,7 +76,6 @@ def theta(A):
                             quantum_parity_addition(C, target)
                             quantum_parity_addition(D, target)
                             circuit.append(cirq.CNOT(A[i][j][k],A_out[i][j][k]))
-
         return A_out
 
 #Rho : Each word is rotated by a fixed number of position according to table.
@@ -95,42 +95,56 @@ def pi(A):
     for i in range(5):
         for j in range(5):
             for k in range(64):
-                A_out[j][(2*i+3*j)%5][k] = A[i][j][k]
+                A_out[i,j,k] = A[(i + 3*j)%5,i,k]
     return A_out
 
 # A_out [i][j][k] = A[i][j][k] XOR ( (A[i + 1][j][k] XOR 1) AND (ain[i + 2][j][k]) )
 def chi(A):
-    chi_reg = [ cirq.NamedQubit("chi_reg" + str(i)) for i in range(1600)]
-    A_out = np.array(chi_reg).reshape(5,5,64) # Initialize empty 5x5x64 array
-    for i in range(5):
-        for j in range(5):
-            for k in range(64):
-                circuit.append(cirq.X(A[(i + 1)%5][j][k]))
-                circuit.append(cirq.TOFFOLI(A[(i + 1)%5][j][k],A[(i + 2)%5][j][k], A_out[i][j][k]))
-                circuit.append(cirq.X(A[(i + 1)%5][j][k]))
-                circuit.append(cirq.CNOT(A[i][j][k], A_out[i][j][k]))
-    return A_out
+    for j in range(5):
+        for k in range(64):
+            temp_reg = [cirq.NamedQubit("temp_reg" + str(i)) for i in range(2)]
+            temp_reg[0] = A[0,j,k]
+            temp_reg[1] = A[1,j,k]
+            for i in range(3):
+                circuit.append(cirq.X(A[(i + 1),j,k]))
+                circuit.append(cirq.TOFFOLI(A[(i + 1),j,k],A[(i + 2),j,k], A[i,j,k]))
+                circuit.append(cirq.X(A[(i + 1),j,k]))
+
+            circuit.append(cirq.X(A[4,j,k]))
+            circuit.append(cirq.TOFFOLI(A[4,j,k], temp_reg[0], A[3,j,k]))
+            circuit.append(cirq.X(A[4,j,k]))
+            circuit.append(cirq.X(temp_reg[0]))
+            circuit.append(cirq.TOFFOLI(temp_reg[1], temp_reg[0], A[4,j,k]))
+            circuit.append(cirq.X(temp_reg[0]))
+    return A
 
 #iota: add constants  to word (0,0)
 # aout[i][j][k] = ain[i][j][k] ⊕ bit[i][j][k]
 # for 0 ≤ ℓ ≤ 6, we have bit[0][0][2ℓ − 1] = rc[ℓ + 7ir]
+
+def rc(t):
+    top = t % 255
+    if top == 0:
+        return 1
+    else:
+        R= [1,0,0,0,0,0,0,0]
+        for i in range(1,top+1):
+            R = [0]+R
+            R[0] = R[0] + R[8] % 2
+            R[4] = R[4] + R[8] % 2
+            R[5] = R[5] + R[8] % 2
+            R[6] = R[6] + R[8] % 2
+            R = R[:8]
+        return R[0]
+
 def iota(A, round):
     # Initialize empty arrays
-    A_out = A.copy()
-    bit = np.zeros((5,5,64), dtype=int)
-    rc = np.zeros((168), dtype=int)
-
-    #generation of rc as Linear Feedback Shift Register
-    w = np.array([1,0,0,0,0,0,0,0], dtype = int)
-    rc[0] = w[0]
-    for i in range(1, 168): #7*24
-        w = [w[1],w[2],w[3],w[4],w[5],w[6],w[7], (w[0]+w[4]+w[5]+w[6]) % 2]
-        rc[i] = w[0]
-
-    # Calculate A_out
+    RC = np.zeros((64), dtype=int)
     for l in range(7):
-        if rc[l + 7*round]:
-            circuit.append(cirq.X(A[0][0][2**l - 1] ))
+        RC[2**l - 1] = rc(l+7*round)
+    for z in range(len(RC)):
+        if RC[z]:
+            circuit.append(cirq.X(A[0][0][z]))
     return A
 
 # 5x5x64 (three-dimensional array) into 1600 bits(one-dimensional array)
